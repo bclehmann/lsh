@@ -22,6 +22,19 @@ identifier = @{ (ASCII_ALPHA | "_" )+ ~ (ASCII_ALPHANUMERIC | "_")* }
 ASSIGNMENT_OPERATOR = _{ "=" }
 assignment = { identifier ~ ASSIGNMENT_OPERATOR ~ expr }
 
+// This is borrowed with some modifications from the pest-parser book: https://github.com/pest-parser/book/blob/master/src/examples/rust/literals.md#strings
+raw_string_double_quote = _{ (!("\\" | "\"") ~ ANY)+ }
+raw_string_single_quote = _{ (!("\\" | "'") ~ ANY)+ }
+hex = _{ '0'..'9' | 'a'..'f' | 'A'..'F' }
+unicode_hex = _{ hex{1, 6} }
+predefined = _{ "n" | "r" | "t" | "\\" | "0" | "\"" | "'" }
+byte = _{ "x" ~ hex{2} }
+unicode = _{ "u" ~ "{" ~ unicode_hex ~ "}" }
+escape = _{ "\\" ~ (predefined | byte | unicode) }
+string = { "\"" ~ (raw_string_double_quote | escape)* ~ "\"" | "'" ~ (raw_string_single_quote | escape)* ~ "'"}
+
+
+
 atom = _{ number | "(" ~ expr ~ ")" | identifier }
 expr = { atom ~ (bin_op ~ atom)* }
 
