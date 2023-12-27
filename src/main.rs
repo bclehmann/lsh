@@ -2,8 +2,7 @@ extern crate pest;
 #[macro_use]
 extern crate pest_derive;
 
-use std::{io, vec};
-use std::cmp::max;
+use std::io;
 use std::collections::HashMap;
 use std::ops::{Add, Div, Mul, Sub};
 use pest::iterators::{Pair, Pairs};
@@ -19,11 +18,19 @@ struct ShellParser;
 pub enum Value {
     Integer(i64),
     Float(f64),
+    String(String),
 }
 
 fn is_integer(v: &Value) -> bool {
     return match v {
-        Integer(x) => true,
+        Integer(_x) => true,
+        _ => false,
+    }
+}
+
+fn is_string(v: &Value) -> bool {
+    return match v {
+        Value::String(_s) => true,
         _ => false,
     }
 }
@@ -31,7 +38,8 @@ fn is_integer(v: &Value) -> bool {
 fn value_to_float_value(v: Value) -> Value {
     return match v {
         Integer(x) => Float(x as f64),
-        Float(x) => v,
+        Float(_x) => v,
+        _ => panic!("Cannot convert string {:?} to float", v),
     };
 }
 
@@ -49,18 +57,24 @@ fn get_float_value(v: Value) -> f64 {
     }
 }
 
+fn value_to_string(v: &Value) -> String {
+    return match v {
+        Integer(x) => i64::to_string(x),
+        Float(x) => f64::to_string(x),
+        Value::String(s) => s.clone(),
+        _ => panic!("Cannot convert value {:?} to string", v),
+    }
+}
+
 impl Clone for Value {
     fn clone(&self) -> Self {
         return match self {
             Value::Integer(x) => Value::Integer(*x),
             Value::Float(x) => Value::Float(*x),
+            Value::String(s) => Value::String(s.clone()),
             _ => panic!("Asked to clone unknown value {:?}", self)
         }
     }
-}
-
-impl Copy for Value {
-
 }
 
 impl Add for Value {
@@ -69,6 +83,10 @@ impl Add for Value {
     fn add(self, rhs: Self) -> Self::Output {
         if is_integer(&self) && is_integer(&rhs) {
             return Value::Integer(get_integral_value(self) + get_integral_value(rhs))
+        }
+
+        if is_string(&self) || is_string(&rhs) {
+            return Value::String(value_to_string(&self) + &value_to_string(&rhs));
         }
 
         return Value::Float(get_float_value(value_to_float_value(self)) + get_float_value(value_to_float_value(rhs)));
@@ -81,7 +99,8 @@ impl Sub for Value {
     fn sub(self, rhs: Self) -> Self::Output {
         return match rhs {
             Value::Integer(x) => self + Value::Integer(-x),
-            Value::Float(x) => self + Value::Float(-x)
+            Value::Float(x) => self + Value::Float(-x),
+            _ => panic!("Operator- not implemented on values {:?} and {:?}", self, rhs)
         };
     }
 }
@@ -145,7 +164,6 @@ pub enum LineOfCode<'a> {
     Assignment(Assignment<'a>)
 }
 
-
 fn create_ast(pairs: Pairs<Rule>) -> Vec<LineOfCode> {
     let mut output: Vec<LineOfCode> = Vec::new();
     for pair in pairs {
@@ -179,7 +197,7 @@ fn parse_assignment(mut pairs: Pairs<Rule>) -> Assignment {
     panic!("Malformed assignment");
 }
 
-fn parse_expr(mut pairs: Pairs<Rule>) -> Expr {
+fn parse_expr(pairs: Pairs<Rule>) -> Expr {
     // FWIW, I think prat means something rude in British English
     let pratt = PrattParser::new()
         .op(Op::infix(Rule::PLUS_SIGN, Assoc::Left) | Op::infix(Rule::MINUS_SIGN, Assoc::Left))
@@ -194,6 +212,11 @@ fn parse_expr(mut pairs: Pairs<Rule>) -> Expr {
                 }
                 return Expr::Value(Value::Float(s.parse::<f64>().unwrap_or_else(|e| panic!("Could not parse number: {:?}", e))));
             }
+            Rule::string => {
+                let s = p.as_str();
+                let dequoted = &s[1..s.len() - 1];
+                return Expr::Value(Value::String(str::to_string(dequoted)));
+            },
             Rule::identifier => Expr::Identifier(p.as_str()),
             Rule::expr => parse_expr(p.into_inner()),
             rule => unreachable!("Invalid rule encountered: {:?}", rule)
@@ -239,11 +262,11 @@ fn interpret_assignment<'a,'b>(line: &'b Assignment<'a>, context: &mut HashMap<&
 
 fn interpret_expr(line: &Expr, context: &HashMap<&str, Value>) -> Value {
     if let Expr::Value(v) = line {
-        return *v;
+        return v.clone();
     }
 
     if let Expr::Identifier(id) = line {
-        return *context.get(*id).unwrap_or_else(|| panic!("Referenced uninitialized variable {:?}", *id));
+        return context.get(*id).unwrap_or_else(|| panic!("Referenced uninitialized variable {:?}", *id)).clone();
     }
 
     if let Expr::BinaryOperation(op) = line {
@@ -263,9 +286,10 @@ fn interpret_expr(line: &Expr, context: &HashMap<&str, Value>) -> Value {
 
 fn main() {
     let stdin = io::stdin();
-    let input = io::read_to_string(stdin).unwrap_or_else(|e| panic!("{}", e));
+    let input = io::read_to_string(stdin).unwrap_or_else(|e| panic!("Could not read input: {}", e));
 
     if let Ok(pairs) = ShellParser::parse(Rule::lines, &input) {
+        println!("{:?}", pairs);
         let ast = create_ast(pairs);
         println!("{:?}", ast);
 
