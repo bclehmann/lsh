@@ -5,6 +5,7 @@ extern crate pest_derive;
 use std::io;
 use std::collections::HashMap;
 use std::ops::{Add, Div, Mul, Sub};
+use std::rc::Rc;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest::pratt_parser::{Assoc, Op, PrattParser};
@@ -173,13 +174,13 @@ pub enum LineOfCode<'a> {
 
 #[derive(Debug)]
 pub struct Function<'a> {
-    variables: Vec<&'a str>,
+    parameters: Vec<&'a str>,
     body: Expr<'a>,
 }
 
 #[derive(Debug)]
 pub struct ExecutionContext<'a> {
-    parent_scope: Option<&'a mut ExecutionContext<'a>>,
+    parent_scope: Option<Box<ExecutionContext<'a>>>,
     variables: HashMap<&'a str, Value>,
     functions: HashMap<&'a str, Function<'a>>
 }
@@ -230,15 +231,19 @@ impl<'a> ExecutionContext<'a> {
         }
 
         if let Some(p) = &mut self.parent_scope {
-            return p.update_value_if_present(identifier, v);
+            p.update_value_if_present(identifier, v);
         }
 
         return false;
     }
 
+    fn set_value_do_not_traverse_parents<'b>(&mut self, identifier: &'b str, v: Value) where 'b : 'a {
+        self.variables.insert(identifier, v.clone());
+    }
+
     fn set_value<'b>(&mut self, identifier: &'b str, v: Value) where 'b : 'a {
         if !self.update_value_if_present(identifier, v.clone()) {
-            self.variables.insert(identifier, v.clone());
+            self.set_value_do_not_traverse_parents(identifier, v.clone());
         }
     }
 }
@@ -337,29 +342,36 @@ fn parse_function_call(mut pairs: Pairs<Rule>) -> FunctionCall {
     panic!("Malformed function call");
 }
 
-fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, context: &mut ExecutionContext<'a>) {
+fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext<'a>>) -> Box<ExecutionContext<'a>> {
     for line in ast {
-        interpret_line(&line, context);
+        let (_, c) = interpret_line(&line, context);
+        context = c;
     }
+
+    return context;
 }
 
-fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: &mut ExecutionContext<'a>) -> Option<Value>
+fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: Box<ExecutionContext<'a>>) -> (Option<Value>, Box<ExecutionContext<'a>>)
 {
     return match line {
         LineOfCode::Assignment(a) => {
-            interpret_assignment(a, context);
-            None
+            let c = interpret_assignment(a, context);
+            return (None, c);
         },
-        LineOfCode::Expr(e) => Some(interpret_expr(e, context))
+        LineOfCode::Expr(e) => {
+            let result = interpret_expr(e, &*context);
+            return (Some(result), context);
+        }
     };
 }
 
-fn interpret_assignment<'a,'b>(line: &'b Assignment<'a>, context: &mut ExecutionContext<'a>) {
-    let result = interpret_expr(&line.right, context);
+fn interpret_assignment<'a,'b>(line: &'b Assignment<'a>, mut context: Box<ExecutionContext<'a>>) -> Box<ExecutionContext<'a>> {
+    let result = interpret_expr(&line.right, &*context);
     context.set_value(line.left, result);
+    return context;
 }
 
-fn interpret_expr(line: &Expr, context: &mut ExecutionContext) -> Value {
+fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value where 'a : 'b {
     if let Expr::Value(v) = line {
         return v.clone();
     }
@@ -369,7 +381,7 @@ fn interpret_expr(line: &Expr, context: &mut ExecutionContext) -> Value {
     }
 
     if let Expr::BinaryOperation(op) = line {
-        let l = interpret_expr(&*op.left, context);
+        let l= interpret_expr(&*op.left, context);
         let r = interpret_expr(&*op.right, context);
 
         return match op.operator {
@@ -379,6 +391,23 @@ fn interpret_expr(line: &Expr, context: &mut ExecutionContext) -> Value {
             BinaryOperator::Divide => l / r,
         };
     };
+
+    if let Expr::FunctionCall(call) = line {
+        let definition = context.get_function(call.function_name).unwrap_or_else(|| panic!("Unknown function {}", call.function_name));
+        if call.arguments.len() != definition.parameters.len() {
+            panic!("Expected {} arguments for function {}, received {}", definition.parameters.len(), call.function_name, call.arguments.len())
+        }
+
+        let mut new_context = ExecutionContext::new();
+        // new_context.parent_scope = Some(context); TODO: Get this working
+
+        for i in 0..definition.parameters.len() {
+            let result = interpret_expr(&call.arguments[i], context);
+            new_context.set_value(definition.parameters[i], result);
+        }
+
+        return interpret_expr(&definition.body, &new_context);
+    }
 
     unreachable!("Unknown Expr: {:?}", line);
 }
@@ -392,8 +421,22 @@ fn main() {
         let ast = create_ast(pairs);
         println!("{:?}", ast);
 
-        let mut context = ExecutionContext::new();
-        interpret_ast(ast, &mut context);
+        let mut context = Box::new(ExecutionContext::new());
+        // TODO: Just a test
+        context.functions.insert("f", Function {
+            parameters: vec![],
+            body: Expr::Value(Value::Integer(1))
+        });
+        context.functions.insert("g", Function {
+            parameters: vec!["x"],
+            body: Expr::BinaryOperation(BinaryOperation {
+                left: Box::new(Expr::Identifier("x")),
+                right: Box::new(Expr::Value(Value::Integer(2))),
+                operator: BinaryOperator::Multiply,
+            })
+        });
+
+        context = interpret_ast(ast, context);
         println!("{:?}", context.get_value("x"));
     } else {
         panic!("Invalid input");
