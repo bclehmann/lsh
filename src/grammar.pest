@@ -33,11 +33,10 @@ unicode = _{ "u" ~ "{" ~ unicode_hex ~ "}" }
 escape = _{ "\\" ~ (predefined | byte | unicode) }
 string = { "\"" ~ (raw_string_double_quote | escape)* ~ "\"" | "'" ~ (raw_string_single_quote | escape)* ~ "'"}
 
-atom = _{ number | "(" ~ expr ~ ")" | identifier | string }
+atom = _{ function_call | number | "(" ~ expr ~ ")" | identifier | string }
 expr = { atom ~ (bin_op ~ atom)* }
 
-argument = @{ (!" " ~ ANY)+ }
-function_call = { identifier ~ (argument)* }
+function_call = { identifier ~ "(" ~ expr ? ~ ("," ~ expr)* ~ ")" }
 
-line = _{ (assignment | expr | function_call) ~ NEWLINE }
+line = _{ ( assignment | expr ) ~ NEWLINE }
 lines = _ { line* }

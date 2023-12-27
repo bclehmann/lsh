@@ -134,7 +134,8 @@ impl Div for Value {
 pub enum Expr<'a> {
     Value(Value),
     Identifier(&'a str),
-    BinaryOperation(BinaryOperation<'a>)
+    BinaryOperation(BinaryOperation<'a>),
+    FunctionCall(FunctionCall<'a>)
 }
 
 #[derive(Debug)]
@@ -159,9 +160,87 @@ pub struct Assignment<'a> {
 }
 
 #[derive(Debug)]
+pub struct FunctionCall<'a> {
+    function_name: &'a str,
+    arguments: Vec<Expr<'a>>
+}
+
+#[derive(Debug)]
 pub enum LineOfCode<'a> {
     Expr(Expr<'a>),
-    Assignment(Assignment<'a>)
+    Assignment(Assignment<'a>),
+}
+
+#[derive(Debug)]
+pub struct Function<'a> {
+    variables: Vec<&'a str>,
+    body: Expr<'a>,
+}
+
+#[derive(Debug)]
+pub struct ExecutionContext<'a> {
+    parent_scope: Option<&'a mut ExecutionContext<'a>>,
+    variables: HashMap<&'a str, Value>,
+    functions: HashMap<&'a str, Function<'a>>
+}
+
+impl<'a> ExecutionContext<'a> {
+    fn new() -> Self {
+        Self {
+            parent_scope: None,
+            variables: HashMap::<&str, Value>::new(),
+            functions: HashMap::<&str, Function>::new(),
+        }
+    }
+
+    fn get_value(&self, identifier: &str) -> Option<Value> {
+        let local = self.variables.get(identifier);
+        if let Some(v) = local {
+            return Some(v.clone());
+        }
+
+        if let Some(p) = &self.parent_scope {
+            if let Some(v) = p.get_value(identifier) {
+                return Some(v.clone());
+            }
+        }
+
+        return None;
+    }
+
+    fn get_function(&self, identifier: &str) -> Option<&Function> {
+        let local = self.functions.get(identifier);
+        if let Some(f) = local {
+            return Some(f);
+        }
+
+        if let Some(p) = &self.parent_scope {
+            if let Some(f) = p.get_function(identifier) {
+                return Some(f);
+            }
+        }
+
+        return None;
+    }
+
+    fn update_value_if_present<'b>(&mut self, identifier: &'b str, v: Value) -> bool where 'b : 'a {
+        if self.variables.contains_key(identifier) {
+            self.variables.insert(identifier, v);
+            return true;
+        }
+
+        if let Some(p) = &mut self.parent_scope {
+            return p.update_value_if_present(identifier, v);
+        }
+
+        return false;
+    }
+
+    fn set_value<'b>(&mut self, identifier: &'b str, v: Value) where 'b : 'a {
+        if !self.update_value_if_present(identifier, v.clone()) {
+            self.variables.insert(identifier, v.clone());
+        }
+    }
 }
 
 fn create_ast(pairs: Pairs<Rule>) -> Vec<LineOfCode> {
@@ -219,6 +298,7 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
             },
             Rule::identifier => Expr::Identifier(p.as_str()),
             Rule::expr => parse_expr(p.into_inner()),
+            Rule::function_call => Expr::FunctionCall(parse_function_call(p.into_inner())),
             rule => unreachable!("Invalid rule encountered: {:?}", rule)
         })
         .map_infix(|left, op, right| {
@@ -239,13 +319,31 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
         .parse(pairs)
 }
 
-fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, context: &mut HashMap<&'a str, Value>) {
+fn parse_function_call(mut pairs: Pairs<Rule>) -> FunctionCall {
+    let identifier = pairs.next().unwrap_or_else(|| panic!("No identifier in assignment"));
+    let mut args = Vec::<Expr>::new();
+
+    if let Rule::identifier = identifier.as_rule() {
+        for expr in pairs {
+            args.push(parse_expr(expr.into_inner()))
+        }
+
+        return FunctionCall {
+            function_name: identifier.as_str(),
+            arguments: args
+        };
+    };
+
+    panic!("Malformed function call");
+}
+
+fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, context: &mut ExecutionContext<'a>) {
     for line in ast {
         interpret_line(&line, context);
     }
 }
 
-fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: &mut HashMap<&'a str, Value>) -> Option<Value>
+fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: &mut ExecutionContext<'a>) -> Option<Value>
 {
     return match line {
         LineOfCode::Assignment(a) => {
@@ -256,17 +354,18 @@ fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: &mut HashMap<&'a str
     };
 }
 
-fn interpret_assignment<'a,'b>(line: &'b Assignment<'a>, context: &mut HashMap<&'a str, Value>) {
-    context.insert(line.left, interpret_expr(&line.right, context));
+fn interpret_assignment<'a,'b>(line: &'b Assignment<'a>, context: &mut ExecutionContext<'a>) {
+    let result = interpret_expr(&line.right, context);
+    context.set_value(line.left, result);
 }
 
-fn interpret_expr(line: &Expr, context: &HashMap<&str, Value>) -> Value {
+fn interpret_expr(line: &Expr, context: &mut ExecutionContext) -> Value {
     if let Expr::Value(v) = line {
         return v.clone();
     }
 
     if let Expr::Identifier(id) = line {
-        return context.get(*id).unwrap_or_else(|| panic!("Referenced uninitialized variable {:?}", *id)).clone();
+        return context.get_value(*id).unwrap_or_else(|| panic!("Referenced uninitialized variable {:?}", *id)).clone();
     }
 
     if let Expr::BinaryOperation(op) = line {
@@ -293,9 +392,9 @@ fn main() {
         let ast = create_ast(pairs);
         println!("{:?}", ast);
 
-        let mut context = HashMap::<&str, Value>::new();
+        let mut context = ExecutionContext::new();
         interpret_ast(ast, &mut context);
-        println!("{:?}", context.get("x"));
+        println!("{:?}", context.get_value("x"));
     } else {
         panic!("Invalid input");
     }
