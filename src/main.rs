@@ -170,19 +170,29 @@ pub struct FunctionCall<'a> {
 pub enum LineOfCode<'a> {
     Expr(Expr<'a>),
     Assignment(Assignment<'a>),
+    FunctionDefinition(String, Function<'a>)
 }
 
 #[derive(Debug)]
 pub struct Function<'a> {
-    parameters: Vec<&'a str>,
-    body: Expr<'a>,
+    parameters: Rc<Vec<&'a str>>,
+    body: Rc<Expr<'a>>,
+}
+
+impl<'a> Clone for Function<'a> {
+    fn clone(&self) -> Self {
+        return Self {
+            parameters: self.parameters.clone(),
+            body: self.body.clone()
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct ExecutionContext<'a> {
     parent_scope: Option<Box<ExecutionContext<'a>>>,
     variables: HashMap<&'a str, Value>,
-    functions: HashMap<&'a str, Function<'a>>
+    functions: HashMap<String, Function<'a>>
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -190,7 +200,7 @@ impl<'a> ExecutionContext<'a> {
         Self {
             parent_scope: None,
             variables: HashMap::<&str, Value>::new(),
-            functions: HashMap::<&str, Function>::new(),
+            functions: HashMap::<String, Function>::new(),
         }
     }
 
@@ -261,6 +271,10 @@ fn parse_line(pair: Pair<Rule>) -> LineOfCode {
     return match pair.as_rule() {
         Rule::assignment => LineOfCode::Assignment(parse_assignment(pair.into_inner())),
         Rule::expr => LineOfCode::Expr(parse_expr(pair.into_inner())),
+        Rule::function_def => {
+            let (identifier, function) = parse_function_def(pair.into_inner());
+            return LineOfCode::FunctionDefinition(identifier, function);
+        }
         rule => panic!("Unexpected rule {:?}", rule)
     }
 }
@@ -324,6 +338,23 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
         .parse(pairs)
 }
 
+fn parse_function_def(mut pairs: Pairs<Rule>) -> (String, Function) {
+    let identifier = pairs.next().unwrap_or_else(|| panic!("No function name"));
+    let param_list = pairs.next().unwrap_or_else(|| panic!("No parameter list"));
+
+    let mut parameters = Vec::<&str>::new();
+    for param in param_list.into_inner() {
+        parameters.push(param.as_str());
+    }
+
+    let body = parse_expr(pairs.next().unwrap_or_else(|| panic!("No function body")).into_inner());
+
+    return (identifier.as_str().to_string(), Function {
+        parameters: Rc::new(parameters),
+        body: Rc::new(body)
+    });
+}
+
 fn parse_function_call(mut pairs: Pairs<Rule>) -> FunctionCall {
     let identifier = pairs.next().unwrap_or_else(|| panic!("No identifier in assignment"));
     let mut args = Vec::<Expr>::new();
@@ -351,7 +382,7 @@ fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext
     return context;
 }
 
-fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: Box<ExecutionContext<'a>>) -> (Option<Value>, Box<ExecutionContext<'a>>)
+fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, mut context: Box<ExecutionContext<'a>>) -> (Option<Value>, Box<ExecutionContext<'a>>)
 {
     return match line {
         LineOfCode::Assignment(a) => {
@@ -361,6 +392,10 @@ fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, context: Box<ExecutionContext
         LineOfCode::Expr(e) => {
             let result = interpret_expr(e, &*context);
             return (Some(result), context);
+        },
+        LineOfCode::FunctionDefinition(name, f) => {
+            context.functions.insert(name.clone(), f.clone());
+            return (None, context);
         }
     };
 }
@@ -422,20 +457,6 @@ fn main() {
         println!("{:?}", ast);
 
         let mut context = Box::new(ExecutionContext::new());
-        // TODO: Just a test
-        context.functions.insert("f", Function {
-            parameters: vec![],
-            body: Expr::Value(Value::Integer(1))
-        });
-        context.functions.insert("g", Function {
-            parameters: vec!["x"],
-            body: Expr::BinaryOperation(BinaryOperation {
-                left: Box::new(Expr::Identifier("x")),
-                right: Box::new(Expr::Value(Value::Integer(2))),
-                operator: BinaryOperator::Multiply,
-            })
-        });
-
         context = interpret_ast(ast, context);
         println!("{:?}", context.get_value("x"));
     } else {
