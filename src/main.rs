@@ -4,6 +4,7 @@ extern crate pest_derive;
 
 use std::io;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::ops::{Add, Div, Mul, Sub};
 use std::rc::Rc;
 use pest::iterators::{Pair, Pairs};
@@ -179,7 +180,7 @@ pub enum LineOfCode<'a> {
 #[derive(Debug)]
 pub struct Function<'a> {
     parameters: Rc<Vec<&'a str>>,
-    body: Rc<Expr<'a>>,
+    body: Rc<FunctionBody<'a>>,
 }
 
 impl<'a> Clone for Function<'a> {
@@ -192,10 +193,15 @@ impl<'a> Clone for Function<'a> {
 }
 
 #[derive(Debug)]
+pub enum FunctionBody<'a> {
+    Expr(Expr<'a>),
+    Intrinsic(String)
+}
+
 pub struct ExecutionContext<'a> {
     parent_scope: Option<&'a mut ExecutionContext<'a>>,
     variables: HashMap<String, Value>,
-    functions: HashMap<String, Function<'a>>
+    functions: HashMap<String, Function<'a>>,
 }
 
 impl<'a> ExecutionContext<'a> {
@@ -356,7 +362,7 @@ fn parse_function_def(mut pairs: Pairs<Rule>) -> (String, Function) {
 
     return (identifier.as_str().to_string(), Function {
         parameters: Rc::new(parameters),
-        body: Rc::new(body)
+        body: Rc::new(FunctionBody::Expr(body))
     });
 }
 
@@ -444,13 +450,31 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
 
         let mut new_context = ExecutionContext::new();
         // new_context.parent_scope = Some(context); TODO: Get this working
+        new_context.variables = context.variables.clone();
+        new_context.functions = context.functions.clone();
 
         for i in 0..definition.parameters.len() {
             let result = interpret_expr(&call.arguments[i], context);
             new_context.set_value(definition.parameters[i], result);
         }
 
-        return interpret_expr(&definition.body, &new_context);
+        return match &definition.body.as_ref() {
+            FunctionBody::Expr(e) => interpret_expr(e, &new_context),
+            FunctionBody::Intrinsic(s) => {
+                return match s.as_ref() {
+                    "print" => {
+                        print!("{:?}", new_context.variables.get("$0"));
+                        return Value::None;
+                    },
+                    "println" => {
+                        println!("{:?}", new_context.variables.get("$0"));
+                        return Value::None;
+                    },
+                    _ => panic!("Unknown intrinsic {}", s),
+                }
+            }
+            _ => panic!("Can't handle intrinsics yet")
+        }
     }
 
     if let Expr::Block(block) = line {
@@ -475,6 +499,14 @@ fn main() {
         let ast = create_ast(pairs);
 
         let mut context = Box::new(ExecutionContext::new());
+        context.functions.insert("print".to_string(), Function {
+            parameters: Rc::new(vec!["$0"]),
+            body: Rc::new(FunctionBody::Intrinsic("print".to_string()))
+        });
+        context.functions.insert("println".to_string(), Function {
+            parameters: Rc::new(vec!["$0"]),
+            body: Rc::new(FunctionBody::Intrinsic("println".to_string()))
+        });
         let (c, result) = interpret_ast(&ast, context);
         println!("{:?}", result);
     } else {
