@@ -33,10 +33,15 @@ unicode = _{ "u" ~ "{" ~ unicode_hex ~ "}" }
 escape = _{ "\\" ~ (predefined | byte | unicode) }
 string = { "\"" ~ (raw_string_double_quote | escape)* ~ "\"" | "'" ~ (raw_string_single_quote | escape)* ~ "'"}
 
-atom = _{ function_call | number | "(" ~ expr ~ ")" | identifier | string }
+atom = _{ function_call | number | "(" ~ expr ~ ")" | identifier | string | block }
 expr = { atom ~ (bin_op ~ atom)* }
 
 function_call = { identifier ~ "(" ~ expr ? ~ ("," ~ expr)* ~ ")" }
+function_param_list = { "(" ~ identifier ? ~ ("," ~ identifier)* ~ ")" }
+function_def = { "def" ~ identifier ~ function_param_list ~ "=>" ~ expr }
 
-line = _{ ( assignment | expr ) ~ NEWLINE }
+line = _{ ( return_statement | function_def | assignment | expr ) ~ NEWLINE }
 lines = _ { line* }
+
+block = { "{" ~ NEWLINE* ~ lines ~ NEWLINE* ~ "}" }
+return_statement = { "return" ~ expr }
