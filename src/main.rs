@@ -20,6 +20,7 @@ pub enum Value {
     Integer(i64),
     Float(f64),
     String(String),
+    None
 }
 
 fn is_integer(v: &Value) -> bool {
@@ -136,7 +137,8 @@ pub enum Expr<'a> {
     Value(Value),
     Identifier(&'a str),
     BinaryOperation(BinaryOperation<'a>),
-    FunctionCall(FunctionCall<'a>)
+    FunctionCall(FunctionCall<'a>),
+    Block(Vec<LineOfCode<'a>>),
 }
 
 #[derive(Debug)]
@@ -170,7 +172,8 @@ pub struct FunctionCall<'a> {
 pub enum LineOfCode<'a> {
     Expr(Expr<'a>),
     Assignment(Assignment<'a>),
-    FunctionDefinition(String, Function<'a>)
+    FunctionDefinition(String, Function<'a>),
+    ReturnStatement(Expr<'a>)
 }
 
 #[derive(Debug)]
@@ -190,8 +193,8 @@ impl<'a> Clone for Function<'a> {
 
 #[derive(Debug)]
 pub struct ExecutionContext<'a> {
-    parent_scope: Option<Box<ExecutionContext<'a>>>,
-    variables: HashMap<&'a str, Value>,
+    parent_scope: Option<&'a mut ExecutionContext<'a>>,
+    variables: HashMap<String, Value>,
     functions: HashMap<String, Function<'a>>
 }
 
@@ -199,7 +202,7 @@ impl<'a> ExecutionContext<'a> {
     fn new() -> Self {
         Self {
             parent_scope: None,
-            variables: HashMap::<&str, Value>::new(),
+            variables: HashMap::<String, Value>::new(),
             functions: HashMap::<String, Function>::new(),
         }
     }
@@ -236,7 +239,7 @@ impl<'a> ExecutionContext<'a> {
 
     fn update_value_if_present<'b>(&mut self, identifier: &'b str, v: Value) -> bool where 'b : 'a {
         if self.variables.contains_key(identifier) {
-            self.variables.insert(identifier, v);
+            self.variables.insert(identifier.to_string(), v);
             return true;
         }
 
@@ -248,7 +251,7 @@ impl<'a> ExecutionContext<'a> {
     }
 
     fn set_value_do_not_traverse_parents<'b>(&mut self, identifier: &'b str, v: Value) where 'b : 'a {
-        self.variables.insert(identifier, v.clone());
+        self.variables.insert(identifier.to_string(), v.clone());
     }
 
     fn set_value<'b>(&mut self, identifier: &'b str, v: Value) where 'b : 'a {
@@ -274,7 +277,8 @@ fn parse_line(pair: Pair<Rule>) -> LineOfCode {
         Rule::function_def => {
             let (identifier, function) = parse_function_def(pair.into_inner());
             return LineOfCode::FunctionDefinition(identifier, function);
-        }
+        },
+        Rule::return_statement => LineOfCode::ReturnStatement(parse_expr(pair.into_inner())),
         rule => panic!("Unexpected rule {:?}", rule)
     }
 }
@@ -318,6 +322,7 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
             Rule::identifier => Expr::Identifier(p.as_str()),
             Rule::expr => parse_expr(p.into_inner()),
             Rule::function_call => Expr::FunctionCall(parse_function_call(p.into_inner())),
+            Rule::block => Expr::Block(create_ast(p.into_inner())),
             rule => unreachable!("Invalid rule encountered: {:?}", rule)
         })
         .map_infix(|left, op, right| {
@@ -373,13 +378,17 @@ fn parse_function_call(mut pairs: Pairs<Rule>) -> FunctionCall {
     panic!("Malformed function call");
 }
 
-fn interpret_ast<'a>(ast: Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext<'a>>) -> Box<ExecutionContext<'a>> {
+fn interpret_ast<'a>(ast: &Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext<'a>>) -> (Box<ExecutionContext<'a>>, Option<Value>) {
     for line in ast {
-        let (_, c) = interpret_line(&line, context);
+        let (result, c) = interpret_line(&line, context);
         context = c;
+
+        if let LineOfCode::ReturnStatement(_) = line {
+            return (context, result);
+        }
     }
 
-    return context;
+    return (context, None);
 }
 
 fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, mut context: Box<ExecutionContext<'a>>) -> (Option<Value>, Box<ExecutionContext<'a>>)
@@ -389,14 +398,14 @@ fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, mut context: Box<ExecutionCon
             let c = interpret_assignment(a, context);
             return (None, c);
         },
-        LineOfCode::Expr(e) => {
+        LineOfCode::Expr(e) | LineOfCode::ReturnStatement(e) => {
             let result = interpret_expr(e, &*context);
             return (Some(result), context);
         },
         LineOfCode::FunctionDefinition(name, f) => {
             context.functions.insert(name.clone(), f.clone());
             return (None, context);
-        }
+        },
     };
 }
 
@@ -444,6 +453,17 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
         return interpret_expr(&definition.body, &new_context);
     }
 
+    if let Expr::Block(block) = line {
+        // Essentially executes in a copy of the current context, where any writes are ignored outside of it
+        // new_context.parent_scope = Some(context.parent_scope); TODO: Get this working
+        let mut new_context = ExecutionContext::new();
+        new_context.variables = context.variables.clone();
+        new_context.functions = context.functions.clone();
+
+        let (_, result) = interpret_ast(block, Box::new(new_context));
+        return result.unwrap_or(Value::None);
+    }
+
     unreachable!("Unknown Expr: {:?}", line);
 }
 
@@ -452,13 +472,11 @@ fn main() {
     let input = io::read_to_string(stdin).unwrap_or_else(|e| panic!("Could not read input: {}", e));
 
     if let Ok(pairs) = ShellParser::parse(Rule::lines, &input) {
-        println!("{:?}", pairs);
         let ast = create_ast(pairs);
-        println!("{:?}", ast);
 
         let mut context = Box::new(ExecutionContext::new());
-        context = interpret_ast(ast, context);
-        println!("{:?}", context.get_value("x"));
+        let (c, result) = interpret_ast(&ast, context);
+        println!("{:?}", result);
     } else {
         panic!("Invalid input");
     }
