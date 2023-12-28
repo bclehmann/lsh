@@ -41,7 +41,7 @@ function_param_list = { "(" ~ identifier ? ~ ("," ~ identifier)* ~ ")" }
 function_def = { "def" ~ identifier ~ function_param_list ~ "=>" ~ expr }
 
 line = _{ ( return_statement | function_def | assignment | expr ) ~ NEWLINE }
-lines = _ { line* }
+lines = _{ (line | NEWLINE)* }
 
 block = { "{" ~ NEWLINE* ~ lines ~ NEWLINE* ~ "}" }
 return_statement = { "return" ~ expr }
