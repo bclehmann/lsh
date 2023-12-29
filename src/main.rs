@@ -46,6 +46,44 @@ impl Value {
     }
 }
 
+impl PartialEq<Self> for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Value::Integer(x) => {
+                return match other {
+                    Value::Integer(y) => return x == y,
+                    Value::Float(y) => return *x as f64 == *y,
+                    _ => false,
+                }
+            },
+            Value::Float(x) => {
+                return match other {
+                    Value::Integer(y) => return *x == *y as f64,
+                    Value::Float(y) => return x == y,
+                    _ => false,
+                }
+            },
+            Value::String(s) => {
+                if let Value::String(s2) = other {
+                    return s == s2;
+                }
+                return false;
+            },
+            Value::None => {
+                return match other {
+                    Value::None => true,
+                    _ => false
+                }
+            },
+            _ => panic!("Unknown value")
+        }
+    }
+}
+
+impl Eq for Value {
+
+}
+
 fn is_integer(v: &Value) -> bool {
     return match v {
         Integer(_x) => true,
@@ -178,7 +216,9 @@ pub enum BinaryOperator {
     Multiply,
     Divide,
     LogicalAnd,
-    LogicalOr
+    LogicalOr,
+    Equals,
+    NotEqual
 }
 
 #[derive(Debug)]
@@ -343,6 +383,7 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
     let pratt = PrattParser::new()
         .op(Op::infix(Rule::PLUS_SIGN, Assoc::Left) | Op::infix(Rule::MINUS_SIGN, Assoc::Left))
         .op(Op::infix(Rule::STAR_SIGN, Assoc::Left) | Op::infix(Rule::FORWARD_SLASH, Assoc::Left))
+        .op(Op::infix(Rule::EQUALS_OPERATOR, Assoc::Left) | Op::infix(Rule::NOT_EQUALS_OPERATOR, Assoc::Left))
         .op(Op::infix(Rule::DOUBLE_AMP, Assoc::Left) | Op::infix(Rule::DOUBLE_PIPE, Assoc::Left));
 
     pratt
@@ -373,6 +414,8 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
                 Rule::FORWARD_SLASH => BinaryOperator::Divide,
                 Rule::DOUBLE_AMP => BinaryOperator::LogicalAnd,
                 Rule::DOUBLE_PIPE => BinaryOperator::LogicalOr,
+                Rule::EQUALS_OPERATOR => BinaryOperator::Equals,
+                Rule::NOT_EQUALS_OPERATOR => BinaryOperator::NotEqual,
                 rule => unreachable!("Invalid rule encountered: {:?}", rule)
             };
 
@@ -515,7 +558,9 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
                     return l;
                 }
                 return r;
-            }
+            },
+            BinaryOperator::Equals => if l == r { Value::Integer(1) } else { Value::Integer(0) },
+            BinaryOperator::NotEqual =>  if l != r { Value::Integer(1) } else { Value::Integer(0) },
         };
     };
 
