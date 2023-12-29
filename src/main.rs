@@ -25,13 +25,23 @@ pub enum Value {
 }
 
 impl Value {
-    fn is_truthy(self) -> bool {
+    fn is_truthy(&self) -> bool {
         match self {
-            Value::Integer(x) => x != 0,
-            Value::Float(x) => x != 0f64,
+            Value::Integer(x) => *x != 0,
+            Value::Float(x) => *x != 0f64,
             Value::String(s) => s != "",
             Value::None => false,
             _ => panic!("Unknown value")
+        }
+    }
+
+    fn format(&self) -> String {
+        match self {
+            Value::Integer(x) => x.to_string(),
+            Value::Float(x) => x.to_string(),
+            Value::String(s) => s.to_string(),
+            Value::None => "None".to_string(),
+            _ => panic!("Unknown value"),
         }
     }
 }
@@ -513,11 +523,11 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
             FunctionBody::Intrinsic(s) => {
                 return match s.as_ref() {
                     "print" => {
-                        print!("{:?}", new_context.variables.get("$0"));
+                        print!("{}", new_context.variables.get("$0").unwrap_or(&Value::None).format());
                         return Value::None;
                     },
                     "println" => {
-                        println!("{:?}", new_context.variables.get("$0"));
+                        println!("{:?}", new_context.variables.get("$0").unwrap_or(&Value::None).format());
                         return Value::None;
                     },
                     _ => panic!("Unknown intrinsic {}", s),
