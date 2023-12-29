@@ -384,7 +384,8 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
         .op(Op::infix(Rule::PLUS_SIGN, Assoc::Left) | Op::infix(Rule::MINUS_SIGN, Assoc::Left))
         .op(Op::infix(Rule::STAR_SIGN, Assoc::Left) | Op::infix(Rule::FORWARD_SLASH, Assoc::Left))
         .op(Op::infix(Rule::EQUALS_OPERATOR, Assoc::Left) | Op::infix(Rule::NOT_EQUALS_OPERATOR, Assoc::Left))
-        .op(Op::infix(Rule::DOUBLE_AMP, Assoc::Left) | Op::infix(Rule::DOUBLE_PIPE, Assoc::Left));
+        .op(Op::infix(Rule::DOUBLE_AMP, Assoc::Left))
+        .op(Op::infix(Rule::DOUBLE_PIPE, Assoc::Left));
 
     pratt
         .map_primary(|p| match p.as_rule() {
