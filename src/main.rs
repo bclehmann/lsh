@@ -176,7 +176,9 @@ pub enum BinaryOperator {
     Add,
     Subtract,
     Multiply,
-    Divide
+    Divide,
+    LogicalAnd,
+    LogicalOr
 }
 
 #[derive(Debug)]
@@ -340,7 +342,8 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
     // FWIW, I think prat means something rude in British English
     let pratt = PrattParser::new()
         .op(Op::infix(Rule::PLUS_SIGN, Assoc::Left) | Op::infix(Rule::MINUS_SIGN, Assoc::Left))
-        .op(Op::infix(Rule::STAR_SIGN, Assoc::Left) | Op::infix(Rule::FORWARD_SLASH, Assoc::Left));
+        .op(Op::infix(Rule::STAR_SIGN, Assoc::Left) | Op::infix(Rule::FORWARD_SLASH, Assoc::Left))
+        .op(Op::infix(Rule::DOUBLE_AMP, Assoc::Left) | Op::infix(Rule::DOUBLE_PIPE, Assoc::Left));
 
     pratt
         .map_primary(|p| match p.as_rule() {
@@ -368,6 +371,8 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
                 Rule::MINUS_SIGN => BinaryOperator::Subtract,
                 Rule::STAR_SIGN => BinaryOperator::Multiply,
                 Rule::FORWARD_SLASH => BinaryOperator::Divide,
+                Rule::DOUBLE_AMP => BinaryOperator::LogicalAnd,
+                Rule::DOUBLE_PIPE => BinaryOperator::LogicalOr,
                 rule => unreachable!("Invalid rule encountered: {:?}", rule)
             };
 
@@ -499,6 +504,18 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
             BinaryOperator::Subtract => l - r,
             BinaryOperator::Multiply => l * r,
             BinaryOperator::Divide => l / r,
+            BinaryOperator::LogicalAnd => {
+                if !l.is_truthy() {
+                    return l;
+                }
+                return r;
+            }
+            BinaryOperator::LogicalOr => {
+                if l.is_truthy() {
+                    return l;
+                }
+                return r;
+            }
         };
     };
 

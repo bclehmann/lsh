@@ -8,8 +8,10 @@ PLUS_SIGN = { "+" }
 MINUS_SIGN = { "-" }
 STAR_SIGN = { "*" }
 FORWARD_SLASH = { "/" }
+DOUBLE_AMP = { "&&" }
+DOUBLE_PIPE = { "||" }
 
-bin_op = _{ PLUS_SIGN | MINUS_SIGN | STAR_SIGN | FORWARD_SLASH }
+bin_op = _{ PLUS_SIGN | MINUS_SIGN | STAR_SIGN | FORWARD_SLASH | DOUBLE_AMP | DOUBLE_PIPE }
 
 integer = @{ MINUS_SIGN? ~ DIGIT+ }
 real = @{ MINUS_SIGN? ~ integer? ~ DECIMAL_POINT ~ DIGIT+ }
