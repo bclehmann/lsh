@@ -24,6 +24,18 @@ pub enum Value {
     None
 }
 
+impl Value {
+    fn is_truthy(self) -> bool {
+        match self {
+            Value::Integer(x) => x != 0,
+            Value::Float(x) => x != 0f64,
+            Value::String(s) => s != "",
+            Value::None => false,
+            _ => panic!("Unknown value")
+        }
+    }
+}
+
 fn is_integer(v: &Value) -> bool {
     return match v {
         Integer(_x) => true,
@@ -174,7 +186,15 @@ pub enum LineOfCode<'a> {
     Expr(Expr<'a>),
     Assignment(Assignment<'a>),
     FunctionDefinition(String, Function<'a>),
-    ReturnStatement(Expr<'a>)
+    ReturnStatement(Expr<'a>),
+    IfStatement(IfStatement<'a>)
+}
+
+#[derive(Debug)]
+pub struct IfStatement<'a> {
+    condition: Expr<'a>,
+    body: Expr<'a>,
+    else_body: Option<Box<LineOfCode<'a>>>
 }
 
 #[derive(Debug)]
@@ -285,6 +305,7 @@ fn parse_line(pair: Pair<Rule>) -> LineOfCode {
             return LineOfCode::FunctionDefinition(identifier, function);
         },
         Rule::return_statement => LineOfCode::ReturnStatement(parse_expr(pair.into_inner())),
+        Rule::if_statement => LineOfCode::IfStatement(parse_if_statement(pair.into_inner())),
         rule => panic!("Unexpected rule {:?}", rule)
     }
 }
@@ -384,6 +405,25 @@ fn parse_function_call(mut pairs: Pairs<Rule>) -> FunctionCall {
     panic!("Malformed function call");
 }
 
+fn parse_if_statement(mut pairs: Pairs<Rule>) -> IfStatement {
+    let condition = parse_expr(pairs.next().unwrap_or_else(|| panic!("No condition in if statement")).into_inner());
+    let body = parse_expr(pairs.next().unwrap_or_else(|| panic!("No body in if statement")).into_inner());
+
+    if let Some(else_body) = pairs.next() {
+        return IfStatement {
+            condition,
+            body,
+            else_body: Some(Box::new(parse_line(else_body)))
+        };
+    }
+    
+    return IfStatement {
+        condition,
+        body,
+        else_body: None,
+    };
+}
+
 fn interpret_ast<'a>(ast: &Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext<'a>>) -> (Box<ExecutionContext<'a>>, Option<Value>) {
     for line in ast {
         let (result, c) = interpret_line(&line, context);
@@ -412,6 +452,16 @@ fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, mut context: Box<ExecutionCon
             context.functions.insert(name.clone(), f.clone());
             return (None, context);
         },
+        LineOfCode::IfStatement(statement) => {
+            if (interpret_expr(&statement.condition, &*context).is_truthy()) {
+                let result = interpret_expr(&statement.body, &*context);
+                return (Some(result), context);
+            } else if let Some(e) = &statement.else_body {
+                return interpret_line(&*e, context);
+            }
+
+            return (None, context);
+        }
     };
 }
 
