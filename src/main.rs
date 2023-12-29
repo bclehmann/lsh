@@ -2,6 +2,7 @@ extern crate pest;
 #[macro_use]
 extern crate pest_derive;
 
+use std::cmp::Ordering;
 use std::io;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -82,6 +83,28 @@ impl PartialEq<Self> for Value {
 
 impl Eq for Value {
 
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        return match self {
+            Value::Integer(x) => return match other {
+                Value::Integer(y) => Some(x.cmp(y)),
+                Value::Float(y) => (*x as f64).partial_cmp(y),
+                _ => None
+            },
+            Value::Float(x) => return match other {
+                Value::Integer(y) => x.partial_cmp(&(*y as f64)),
+                Value::Float(y) => x.partial_cmp(y),
+                _ => None
+            },
+            Value::String(s) => return match other {
+                Value::String(s2) => Some(s.cmp(s2)),
+                _ => None
+            },
+            _ => None
+        }
+    }
 }
 
 fn is_integer(v: &Value) -> bool {
@@ -218,7 +241,11 @@ pub enum BinaryOperator {
     LogicalAnd,
     LogicalOr,
     Equals,
-    NotEqual
+    NotEqual,
+    LessThan,
+    LessEqual,
+    GreaterThan,
+    GreaterEqual
 }
 
 #[derive(Debug)]
@@ -239,7 +266,8 @@ pub enum LineOfCode<'a> {
     Assignment(Assignment<'a>),
     FunctionDefinition(String, Function<'a>),
     ReturnStatement(Expr<'a>),
-    IfStatement(IfStatement<'a>)
+    IfStatement(IfStatement<'a>),
+    WhileLoop(WhileLoop<'a>),
 }
 
 #[derive(Debug)]
@@ -247,6 +275,12 @@ pub struct IfStatement<'a> {
     condition: Expr<'a>,
     body: Expr<'a>,
     else_body: Option<Box<LineOfCode<'a>>>
+}
+
+#[derive(Debug)]
+pub struct WhileLoop<'a> {
+    condition: Expr<'a>,
+    body: Expr<'a>,
 }
 
 #[derive(Debug)]
@@ -358,6 +392,7 @@ fn parse_line(pair: Pair<Rule>) -> LineOfCode {
         },
         Rule::return_statement => LineOfCode::ReturnStatement(parse_expr(pair.into_inner())),
         Rule::if_statement => LineOfCode::IfStatement(parse_if_statement(pair.into_inner())),
+        Rule::while_loop => LineOfCode::WhileLoop(parse_while_loop(pair.into_inner())),
         rule => panic!("Unexpected rule {:?}", rule)
     }
 }
@@ -383,6 +418,7 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
     let pratt = PrattParser::new()
         .op(Op::infix(Rule::PLUS_SIGN, Assoc::Left) | Op::infix(Rule::MINUS_SIGN, Assoc::Left))
         .op(Op::infix(Rule::STAR_SIGN, Assoc::Left) | Op::infix(Rule::FORWARD_SLASH, Assoc::Left))
+        .op(Op::infix(Rule::LESS_THAN, Assoc::Left) | Op::infix(Rule::LESS_EQUAL, Assoc::Left) | Op::infix(Rule::GREATER_THAN, Assoc::Left) | Op::infix(Rule::GREATER_EQUAL, Assoc::Left))
         .op(Op::infix(Rule::EQUALS_OPERATOR, Assoc::Left) | Op::infix(Rule::NOT_EQUALS_OPERATOR, Assoc::Left))
         .op(Op::infix(Rule::DOUBLE_AMP, Assoc::Left))
         .op(Op::infix(Rule::DOUBLE_PIPE, Assoc::Left));
@@ -408,6 +444,9 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
             rule => unreachable!("Invalid rule encountered: {:?}", rule)
         })
         .map_infix(|left, op, right| {
+
+            println!("{:?}", op);
+
             let operator = match op.as_rule() {
                 Rule::PLUS_SIGN => BinaryOperator::Add,
                 Rule::MINUS_SIGN => BinaryOperator::Subtract,
@@ -417,6 +456,10 @@ fn parse_expr(pairs: Pairs<Rule>) -> Expr {
                 Rule::DOUBLE_PIPE => BinaryOperator::LogicalOr,
                 Rule::EQUALS_OPERATOR => BinaryOperator::Equals,
                 Rule::NOT_EQUALS_OPERATOR => BinaryOperator::NotEqual,
+                Rule::LESS_THAN => BinaryOperator::LessThan,
+                Rule::LESS_EQUAL => BinaryOperator::LessEqual,
+                Rule::GREATER_THAN => BinaryOperator::GreaterThan,
+                Rule::GREATER_EQUAL => BinaryOperator::GreaterEqual,
                 rule => unreachable!("Invalid rule encountered: {:?}", rule)
             };
 
@@ -483,6 +526,16 @@ fn parse_if_statement(mut pairs: Pairs<Rule>) -> IfStatement {
     };
 }
 
+fn parse_while_loop(mut pairs: Pairs<Rule>) -> WhileLoop {
+    let condition = parse_expr(pairs.next().unwrap_or_else(|| panic!("No condition in while loop")).into_inner());
+    let body = parse_expr(pairs.next().unwrap_or_else(|| panic!("No body in while loop")).into_inner());
+
+    return WhileLoop {
+        condition,
+        body,
+    };
+}
+
 fn interpret_ast<'a>(ast: &Vec<LineOfCode<'a>>, mut context: Box<ExecutionContext<'a>>) -> (Box<ExecutionContext<'a>>, Option<Value>) {
     for line in ast {
         let (result, c) = interpret_line(&line, context);
@@ -520,6 +573,14 @@ fn interpret_line<'a,'b>(line: &'b LineOfCode<'a>, mut context: Box<ExecutionCon
             }
 
             return (None, context);
+        },
+        LineOfCode::WhileLoop(while_loop) => {
+            let mut result = None;
+            while (interpret_expr(&while_loop.condition, &*context).is_truthy()) {
+                result = Some(interpret_expr(&while_loop.body, &*context));
+            }
+
+            return (result, context);
         }
     };
 }
@@ -562,6 +623,10 @@ fn interpret_expr<'a, 'b>(line: &Expr, context: &ExecutionContext<'a>) -> Value 
             },
             BinaryOperator::Equals => if l == r { Value::Integer(1) } else { Value::Integer(0) },
             BinaryOperator::NotEqual =>  if l != r { Value::Integer(1) } else { Value::Integer(0) },
+            BinaryOperator::LessThan => if l < r { Value::Integer(1) } else { Value::Integer(0) },
+            BinaryOperator::LessEqual => if l <= r { Value::Integer(1) } else { Value::Integer(0) },
+            BinaryOperator::GreaterThan => if l > r { Value::Integer(1) } else { Value::Integer(0) },
+            BinaryOperator::GreaterEqual => if l >= r { Value::Integer(1) } else { Value::Integer(0) },
         };
     };
 

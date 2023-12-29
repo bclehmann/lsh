@@ -12,8 +12,12 @@ DOUBLE_AMP = { "&&" }
 DOUBLE_PIPE = { "||" }
 EQUALS_OPERATOR = { "==" }
 NOT_EQUALS_OPERATOR = { "!=" }
+LESS_THAN = { "<" }
+LESS_EQUAL = { "<=" }
+GREATER_THAN = { ">" }
+GREATER_EQUAL = { ">=" }
 
-bin_op = _{ PLUS_SIGN | MINUS_SIGN | STAR_SIGN | FORWARD_SLASH | DOUBLE_AMP | DOUBLE_PIPE | EQUALS_OPERATOR | NOT_EQUALS_OPERATOR }
+bin_op = _{ PLUS_SIGN | MINUS_SIGN | STAR_SIGN | FORWARD_SLASH | DOUBLE_AMP | DOUBLE_PIPE | EQUALS_OPERATOR | NOT_EQUALS_OPERATOR | LESS_EQUAL | LESS_THAN | GREATER_EQUAL | GREATER_THAN }
 
 integer = @{ MINUS_SIGN? ~ DIGIT+ }
 real = @{ MINUS_SIGN? ~ integer? ~ DECIMAL_POINT ~ DIGIT+ }
@@ -44,9 +48,10 @@ function_call = { identifier ~ "(" ~ expr ? ~ ("," ~ expr)* ~ ")" }
 function_param_list = { "(" ~ identifier ? ~ ("," ~ identifier)* ~ ")" }
 function_def = { "def" ~ identifier ~ function_param_list ~ "=>" ~ expr }
 
-line = _{ ( return_statement | if_statement | function_def | assignment | expr ) ~ NEWLINE }
+line = _{ ( return_statement | if_statement | while_loop | function_def | assignment | expr ) ~ NEWLINE }
 lines = _{ (line | NEWLINE)* }
 
 block = { "{" ~ NEWLINE* ~ lines ~ NEWLINE* ~ "}" }
 return_statement = { "return" ~ expr }
 if_statement = { "if" ~ expr ~ expr ~ ("else" ~ (if_statement | expr))?}
+while_loop = { "while" ~ expr ~ expr }
